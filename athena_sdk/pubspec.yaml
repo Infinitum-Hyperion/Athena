@@ -8,7 +8,8 @@ environment:
 
 # Add regular dependencies here.
 dependencies:
-  # path: ^1.8.0
+  mochaccino_sdk:
+    path: ../../Mochaccino/mochaccino_sdk
 
 dev_dependencies:
   lints: ^4.0.0
