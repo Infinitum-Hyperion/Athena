@@ -1,31 +1,13 @@
 import 'package:athena_sdk/athena_sdk.dart';
 
 void main(List<String> arguments) {
-  final FuncDeclNode funcDeclNode = FuncDeclNode(
-    body: BlockNode(
-      childNodes: [
-        ParamDeclNode(name: 'x', type: 'List<int>'),
-        ForLoopNode(
-          scopedVar: VarDeclNode(
-            name: 'i',
-            type: 'int',
-            value: LiteralNode(type: 'string', value: 0),
-          ),
-          clause: BinExpNode(
-            left: VarRefNode(varName: 'i'),
-            operator: ASTOperatorNode(operator: '<'),
-            right: PropAccessNode(
-                obj: VarRefNode(varName: 'x'), property: 'length'),
-          ),
-          increment: UnaryExpNode(
-            operand: VarRefNode(varName: 'i'),
-            operator: ASTOperatorNode(operator: '++'),
-          ),
-          body: [],
-        ),
-      ],
-    ),
-  );
+  const src1 = """var res = 10;
+var y = 10 + 5;
+var x = 2;
+var z = y - x;
+var a;
+var g = z - a;
+""";
 
   AverhydeBeta(
     kgraph: KnowledgeGraph(
@@ -60,10 +42,5 @@ void main(List<String> arguments) {
         ),
       ],
     ),
-  ).createAlternatives(
-    origin: funcDeclNode.body,
-    fullContext: AST(
-      topLevelNodes: [funcDeclNode],
-    ),
-  );
+  ).createAlternatives(source: src1);
 }

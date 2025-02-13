@@ -13,11 +13,13 @@ class Constraints {
   DiscreteRangeConstraint discreteRangeConstraint;
   ContinuousRangeConstraint continuousRangeConstraint;
   ValueConstraint valueConstraint;
+  BooleanConstraint booleanConstraint;
 
   Constraints({
     DiscreteRangeConstraint? discreteRangeConstraint,
     ContinuousRangeConstraint? continuousRangeConstraint,
     ValueConstraint? valueConstraint,
+    BooleanConstraint? booleanConstraint,
   })  : discreteRangeConstraint =
             discreteRangeConstraint ?? DiscreteRangeConstraint(null),
         continuousRangeConstraint = continuousRangeConstraint ??
@@ -27,7 +29,8 @@ class Constraints {
               lowerBoundType: null,
               upperBoundType: null,
             ),
-        valueConstraint = valueConstraint ?? ValueConstraint(null);
+        valueConstraint = valueConstraint ?? ValueConstraint(null),
+        booleanConstraint = booleanConstraint ?? BooleanConstraint([], []);
 
   /// For no other purpose than to be perfectly explicit, we add an empty named constructor.
   Constraints.none()
@@ -38,7 +41,8 @@ class Constraints {
           lowerBoundType: null,
           upperBoundType: null,
         ),
-        valueConstraint = ValueConstraint(null);
+        valueConstraint = ValueConstraint(null),
+        booleanConstraint = BooleanConstraint(const [], const []);
 
   Constraints operator +(Constraints other) {
     return Constraints(
@@ -59,6 +63,12 @@ class Constraints {
       valueConstraint: valueConstraint - other.valueConstraint,
     );
   }
+
+  String prettyPrint(int indent) =>
+      "${' ' * indent} |- Discrete\n${discreteRangeConstraint.prettyPrint(indent + 2)}\n" +
+      "${' ' * indent} |- Continuous\n${continuousRangeConstraint.prettyPrint(indent + 2)}\n" +
+      "${' ' * indent} |- Value\n${valueConstraint.prettyPrint(indent + 2)}\n" +
+      "${' ' * indent} |- Boolean\n${booleanConstraint.prettyPrint(indent + 2)}";
 }
 
 sealed class Constraint {
@@ -72,14 +82,16 @@ sealed class Constraint {
   /// E.g: [1, 2, 3] - [2, 3, 4] = [1, -4]
   List<Expr> subtractAndNegate(List<Expr> a, List<Expr> b) =>
       [...a, ...b.where((expr) => !a.contains(expr))];
+
+  String prettyPrint(int indent);
 }
 
-ConstraintExpression? mergeNulls(
-  ConstraintExpression? a,
-  ConstraintExpression? b, {
-  required ConstraintExpression Function(
-    ConstraintExpression a,
-    ConstraintExpression b,
+T? mergeNulls<T>(
+  T? a,
+  T? b, {
+  required T Function(
+    T a,
+    T b,
   ) orElse,
 }) {
   if (a == null && b == null) {
@@ -111,6 +123,13 @@ class DiscreteRangeConstraint extends Constraint {
                 [...a.$2, ...b.$2],
               )),
     );
+  }
+
+  @override
+  String prettyPrint(int indent) {
+    return includedValues != null
+        ? "${' ' * indent} |- ${includedValues!.$1.map((expr) => expr.runtimeType).join(', ')}"
+        : "${' ' * indent} |- NONE";
   }
 }
 
@@ -198,6 +217,10 @@ class ContinuousRangeConstraint extends RangeConstraint {
           newUpper != null ? upperBoundType!.union(other.upperBoundType) : null,
     );
   }
+
+  String prettyPrint(int indent) {
+    return "${' ' * indent} |- Lower: $lowerBound, Upper: $upperBound";
+  }
 }
 
 class ValueConstraint extends Constraint {
@@ -229,5 +252,59 @@ class ValueConstraint extends Constraint {
         ),
       ),
     );
+  }
+
+  @override
+  String prettyPrint(int indent) {
+    if (value != null) {
+      final List<String> res = [];
+      for (final expr in value!.$1) {
+        res.add("${' ' * indent}|- EXPR: ${expr.runtimeType.toString()}");
+      }
+      res.add("${' ' * indent} |- CONST: ${value!.$2[0]}");
+      return res.join('\n');
+    } else {
+      return "${' ' * indent} |- NONE";
+    }
+  }
+}
+
+/// Used to constrain boolean expressions. Either [whenTrue] or [whenFalse] can be empty.
+/// If both are empty, the boolean constraint is considered to be unconstrained.
+/// When directly creating a [BooleanConstraint], pass in the [whenTrue] constraints. The
+/// [whenFalse] constraints are reserved for the [not] method, which flips the constraint conditions.
+/// The 2D list structure is enforces the relationship between [Constraint]s:
+/// - The outer list contains sets of [Constraint]s combined with a logical OR.
+/// - The inner list represents [Constraint]s combined with a logical AND.
+class BooleanConstraint extends Constraint {
+  final List<List<Constraints>> whenTrue;
+  final List<List<Constraints>> whenFalse;
+
+  const BooleanConstraint(this.whenTrue, this.whenFalse);
+
+  BooleanConstraint and(BooleanConstraint other) {
+    return BooleanConstraint(
+      [
+        for (final set in whenTrue) ...[set, ...other.whenTrue]
+      ],
+      [
+        for (final set in whenFalse) ...[set, ...other.whenFalse]
+      ],
+    );
+  }
+
+  BooleanConstraint or(BooleanConstraint other) {
+    return BooleanConstraint(
+      [...whenTrue, ...other.whenTrue],
+      [...whenFalse, ...other.whenFalse],
+    );
+  }
+
+  BooleanConstraint not() => BooleanConstraint(whenFalse, whenTrue);
+
+  @override
+  String prettyPrint(int indent) {
+    return "${' ' * indent} |- whenTrue: ${whenTrue.map((set) => set.map((c) => c.prettyPrint(0)).join(', ')).join(' | ')}\n" +
+        "${' ' * indent} |- whenFalse: ${whenFalse.map((set) => set.map((c) => c.prettyPrint(0)).join(', ')).join(' | ')}";
   }
 }

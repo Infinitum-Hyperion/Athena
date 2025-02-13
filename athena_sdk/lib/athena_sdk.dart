@@ -17,22 +17,22 @@ class AverhydeBeta {
 
   List<AST> createAlternatives({
     required String source,
-    required FunctionStmt origin,
+    // required FunctionStmt origin,
   }) {
     final List<Token> tokens = Tokeniser(source: source).tokenise();
     final AST ast = Parser(tokens).parse();
     final history = analyseTemporalDependencies();
 
-    final List<StateGraph2D> possibleStates = StateGraphSimulator(
+    final StateGraph2D endState = StateGraphSimulator(
       tokens: tokens,
       ast: ast,
-      origin: origin,
+      // origin: origin,
     ).simulate2D();
 
-    throw UnimplementedError();
+    endState.prettyPrint();
+
+    return [];
   }
 
   void analyseTemporalDependencies() {}
 }
-
-class StateGraph2D {}
