@@ -1,39 +1,58 @@
 part of athena;
 
 class StateGraphSimulator {
-  final ExprStateSimulator exprSimulator = ExprStateSimulator();
-  late final StmtStateSimulator stmtSimulator =
-      StmtStateSimulator(exprSimulator);
+  final StateGraph2D defaultStateGraph = StateGraph2D();
+  late final Map<String, StateGraph2D> possibilites = {
+    defaultStateGraph.id: defaultStateGraph
+  };
+  late final ExprStateSimulator exprSimulator = ExprStateSimulator(
+    stateGraph2D: defaultStateGraph,
+  );
+  late final StmtStateSimulator stmtSimulator = StmtStateSimulator(sim: this);
   final AST ast;
+  late String currentStateGraphId = defaultStateGraph.id;
+
+  StateGraph2D get currentState => possibilites[currentStateGraphId]!;
 
   StateGraphSimulator({
-    required List<Token> tokens,
     required this.ast,
   });
 
-  StateGraph2D simulate2D() {
-    stmtSimulator.visitBlockStmt(
-        ast is BlockStmt ? ast as BlockStmt : BlockStmt(statements: ast));
-    return exprSimulator.stateGraph2D;
+  /// Set a new variable-constraint mapping
+  void setContext(String id) => currentStateGraphId = id;
+
+  /// Delete an old mapping
+  void deleteContext(String id) => possibilites.remove(id);
+
+  void addGraph(StateGraph2D stateGraph) =>
+      possibilites[stateGraph.id] = stateGraph;
+
+  Iterable<StateGraph2D> simulate2D() {
+    for (final stmt in ast) {
+      stmt.accept(stmtSimulator);
+    }
+
+    return possibilites.values;
   }
 }
 
 class StmtStateSimulator implements StmtVisitor<void> {
-  final ExprStateSimulator exprSimulator;
+  final StateGraphSimulator sim;
 
-  StmtStateSimulator(this.exprSimulator);
+  StmtStateSimulator({
+    required this.sim,
+  });
 
   @override
   void visitBlockStmt(BlockStmt stmt) {
     for (final statement in stmt.statements) {
-      print('Visiting ${statement.runtimeType}');
       statement.accept(this);
     }
   }
 
   @override
   void visitExpressionStmt(ExpressionStmt stmt) {
-    stmt.expression.accept(exprSimulator);
+    stmt.expression.accept(sim.exprSimulator);
   }
 
   @override
@@ -43,32 +62,33 @@ class StmtStateSimulator implements StmtVisitor<void> {
 
   @override
   void visitIfStmt(IfStmt stmt) {
-    // note the initial condition, in order to simulate the else-branch later on
-    final initialCondition = exprSimulator.stateGraph2D.current;
-    // if-branch precondition
-    final ifCondition = stmt.condition.accept(exprSimulator).booleanConstraint;
-    // add a subgraph based on this condition
-    exprSimulator.stateGraph2D.addEdge(
-      node: initialCondition,
-      condition: ifCondition,
-    );
+    print('orig: ${sim.currentState.id}');
+    // 1. Clone the current context and then delete it
+    final ifBranchStateGraph = StateGraph2D.clone(sim.currentState);
+    print('if: ${ifBranchStateGraph.id}');
+    sim.addGraph(ifBranchStateGraph);
+    final elseBranchStateGraph = StateGraph2D.clone(sim.currentState);
+    print('else: ${elseBranchStateGraph.id}');
+    sim.addGraph(elseBranchStateGraph);
+    sim.deleteContext(sim.currentState.id);
 
-    // simulate the if-branch
+    // 2. simulate the if-branch
+    sim.setContext(ifBranchStateGraph.id);
+    //    evaluate the if-condition and assert those constraints
+    ifBranchStateGraph.mode = StateGraphMode.assrt;
+    stmt.condition.accept(sim.exprSimulator);
+    ifBranchStateGraph.mode = StateGraphMode.none;
+    //    run the if-branch statements
     stmt.thenBranch.accept(this);
-    // else-branch precondition
-    final elseCondition = ifCondition.not();
-    // simulate the else-branch
-    exprSimulator.stateGraph2D.addEdge(
-      node: initialCondition,
-      condition: elseCondition,
-    );
-    // else-branch postcondition
-    stmt.elseBranch?.accept(this);
 
-    // merge the two states if possible and reset the state pointer in the state graph
-    exprSimulator.stateGraph2D.mergeIfElseBranchStates(
-      initialState: initialCondition,
-    );
+    // 3. simulate the else-branch
+    sim.setContext(elseBranchStateGraph.id);
+    //    evaluate the else-condition and assert those constraints
+    elseBranchStateGraph.mode = StateGraphMode.assrt;
+    stmt.condition.accept(sim.exprSimulator);
+    elseBranchStateGraph.mode = StateGraphMode.none;
+    //    run the if-branch statements
+    stmt.thenBranch.accept(this);
   }
 
   @override
@@ -80,9 +100,9 @@ class StmtStateSimulator implements StmtVisitor<void> {
   void visitVarStmt(VarStmt stmt) {
     Constraints? varConstraints;
     if (stmt.initializer != null) {
-      varConstraints = stmt.initializer!.accept(exprSimulator);
+      varConstraints = stmt.initializer!.accept(sim.exprSimulator);
     }
-    exprSimulator.stateGraph2D
+    sim.currentState
         .updateVar(stmt.name.lexeme, varConstraints ?? Constraints.none());
   }
 
@@ -105,16 +125,17 @@ class StmtStateSimulator implements StmtVisitor<void> {
 }
 
 class ExprStateSimulator implements ExprVisitor<Constraints> {
-  final StateGraph2D stateGraph2D = StateGraph2D();
-  ExprStateSimulator();
+  final StateGraph2D stateGraph2D;
+
+  ExprStateSimulator({
+    required this.stateGraph2D,
+  });
 
   @override
   Constraints visitBinaryExpr(BinaryExpr expr) {
-    print('bin exp');
     final left = evalConstraints(expr.left);
     final right = evalConstraints(expr.right);
-    print(left.prettyPrint(0));
-    print(right.prettyPrint(0));
+
     switch (expr.operator.tokenType) {
       case TokenType.PLUS:
         return left + right;
@@ -132,88 +153,112 @@ class ExprStateSimulator implements ExprVisitor<Constraints> {
     }
   }
 
+  /// Flips comparative operators, so that the right-hand operand can be made
+  /// the subject (which is the left-hand operand)
+  TokenType flipOperator(TokenType op) => switch (op) {
+        TokenType.R_CHEV => TokenType.L_CHEV,
+        TokenType.L_CHEV => TokenType.R_CHEV,
+        TokenType.MORE_THAN_OR_EQUAL => TokenType.LESS_THAN_OR_EQUAL,
+        TokenType.LESS_THAN_OR_EQUAL => TokenType.MORE_THAN_OR_EQUAL,
+        TokenType() => throw UnimplementedError(),
+      };
+
   /// This is not defined in the [ExprVisitor] interface, but we need to separate
   /// updates to [Constraints]s from the assertion of [Constraints]s.
   /// Typically, this method will be called by the visitors from [StmtStateSimulator]
   /// when evaluating conditional structures such as `for` and `if`.
-  Constraints visitComparisonExpr(BinaryExpr expr) {
-    final left = evalConstraints(expr.left);
-    final right = evalConstraints(expr.right);
-
-    switch (expr.operator.tokenType) {
-      case TokenType.R_CHEV:
-        return Constraints(
-          continuousRangeConstraint: ContinuousRangeConstraint(
-            lowerBoundType: BoundType.exclusive,
-            lowerBound: mergeNulls(
-              left.continuousRangeConstraint.lowerBound,
-              right.continuousRangeConstraint.lowerBound,
-              orElse: (a, b) => (b),
+  Constraints visitComparisonExpr(BinaryExpr binExpr) {
+    Constraints getLeftOperandConstraints(
+        Expr leftExpr, TokenType op, Expr rightExpr) {
+      final left = evalConstraints(leftExpr);
+      final right = evalConstraints(rightExpr);
+      return switch (op) {
+        TokenType.R_CHEV => Constraints(
+            continuousRangeConstraint: ContinuousRangeConstraint(
+              lowerBoundType: BoundType.exclusive,
+              lowerBound: mergeNulls(
+                left.continuousRangeConstraint.lowerBound,
+                right.continuousRangeConstraint.lowerBound,
+                orElse: (a, b) => (b),
+              ),
+              upperBound: mergeNulls(
+                left.continuousRangeConstraint.upperBound,
+                right.continuousRangeConstraint.upperBound,
+                orElse: (a, b) => (a),
+              ),
+              upperBoundType: left.continuousRangeConstraint.upperBoundType,
             ),
-            upperBound: mergeNulls(
-              left.continuousRangeConstraint.upperBound,
-              right.continuousRangeConstraint.upperBound,
-              orElse: (a, b) => (a),
-            ),
-            upperBoundType: left.continuousRangeConstraint.upperBoundType,
           ),
-        );
-      case TokenType.MORE_THAN_OR_EQUAL:
-        return Constraints(
-          continuousRangeConstraint: ContinuousRangeConstraint(
-            lowerBoundType: BoundType.inclusive,
-            lowerBound: mergeNulls(
-              left.continuousRangeConstraint.lowerBound,
-              right.continuousRangeConstraint.lowerBound,
-              orElse: (a, b) => (b),
+        TokenType.MORE_THAN_OR_EQUAL => Constraints(
+            continuousRangeConstraint: ContinuousRangeConstraint(
+              lowerBoundType: BoundType.inclusive,
+              lowerBound: mergeNulls(
+                left.continuousRangeConstraint.lowerBound,
+                right.continuousRangeConstraint.lowerBound,
+                orElse: (a, b) => (b),
+              ),
+              upperBound: mergeNulls(
+                left.continuousRangeConstraint.upperBound,
+                right.continuousRangeConstraint.upperBound,
+                orElse: (a, b) => (a),
+              ),
+              upperBoundType: left.continuousRangeConstraint.upperBoundType,
             ),
-            upperBound: mergeNulls(
-              left.continuousRangeConstraint.upperBound,
-              right.continuousRangeConstraint.upperBound,
-              orElse: (a, b) => (a),
-            ),
-            upperBoundType: left.continuousRangeConstraint.upperBoundType,
           ),
-        );
-      case TokenType.L_CHEV:
-        return Constraints(
-          continuousRangeConstraint: ContinuousRangeConstraint(
-            lowerBoundType: left.continuousRangeConstraint.lowerBoundType,
-            lowerBound: mergeNulls(
-              left.continuousRangeConstraint.lowerBound,
-              right.continuousRangeConstraint.lowerBound,
-              orElse: (a, b) => (a),
+        TokenType.L_CHEV => Constraints(
+            continuousRangeConstraint: ContinuousRangeConstraint(
+              lowerBoundType: left.continuousRangeConstraint.lowerBoundType,
+              lowerBound: mergeNulls(
+                left.continuousRangeConstraint.lowerBound,
+                right.continuousRangeConstraint.lowerBound,
+                orElse: (a, b) => (a),
+              ),
+              upperBound: mergeNulls(
+                left.continuousRangeConstraint.upperBound,
+                right.continuousRangeConstraint.upperBound,
+                orElse: (a, b) => (b),
+              ),
+              upperBoundType: BoundType.exclusive,
             ),
-            upperBound: mergeNulls(
-              left.continuousRangeConstraint.upperBound,
-              right.continuousRangeConstraint.upperBound,
-              orElse: (a, b) => (b),
-            ),
-            upperBoundType: BoundType.exclusive,
           ),
-        );
-      case TokenType.LESS_THAN_OR_EQUAL:
-        return Constraints(
-          continuousRangeConstraint: ContinuousRangeConstraint(
-            lowerBoundType: left.continuousRangeConstraint.lowerBoundType,
-            lowerBound: mergeNulls(
-              left.continuousRangeConstraint.lowerBound,
-              right.continuousRangeConstraint.lowerBound,
-              orElse: (a, b) => (a),
+        TokenType.LESS_THAN_OR_EQUAL => Constraints(
+            continuousRangeConstraint: ContinuousRangeConstraint(
+              lowerBoundType: left.continuousRangeConstraint.lowerBoundType,
+              lowerBound: mergeNulls(
+                left.continuousRangeConstraint.lowerBound,
+                right.continuousRangeConstraint.lowerBound,
+                orElse: (a, b) => (a),
+              ),
+              upperBound: mergeNulls(
+                left.continuousRangeConstraint.upperBound,
+                right.continuousRangeConstraint.upperBound,
+                orElse: (a, b) => (b),
+              ),
+              upperBoundType: BoundType.inclusive,
             ),
-            upperBound: mergeNulls(
-              left.continuousRangeConstraint.upperBound,
-              right.continuousRangeConstraint.upperBound,
-              orElse: (a, b) => (b),
-            ),
-            upperBoundType: BoundType.inclusive,
           ),
-        );
-      case TokenType.BANG_EQUAL:
-      case TokenType.EQUAL_EQUAL:
-      default:
-        throw UnimplementedError();
+        TokenType.BANG_EQUAL => Constraints.none(),
+        TokenType.EQUAL_EQUAL => Constraints.none(),
+        TokenType() => throw UnimplementedError(),
+      };
     }
+
+    stateGraph2D.assignOrAssertConstraints(
+      binExpr.left,
+      getLeftOperandConstraints(
+          binExpr.left, binExpr.operator.tokenType, binExpr.right),
+    );
+
+    if (![TokenType.EQUAL_EQUAL, TokenType.BANG_EQUAL]
+        .contains(binExpr.operator.tokenType)) {
+      stateGraph2D.assignOrAssertConstraints(
+        binExpr.left,
+        getLeftOperandConstraints(binExpr.right,
+            flipOperator(binExpr.operator.tokenType), binExpr.left),
+      );
+    }
+
+    return Constraints.none();
   }
 
   @override
@@ -301,53 +346,56 @@ class ExprStateSimulator implements ExprVisitor<Constraints> {
   }
 }
 
+enum StateGraphMode {
+  assign,
+  assrt,
+  none;
+}
+
 class StateGraph2D {
-  final StateGraph2DNode root = StateGraph2DNode.empty();
-  late StateGraph2DNode current = root;
+  final Map<String, Constraints> variables = {};
+  late final String id = hashCode.toString();
+  StateGraphMode mode = StateGraphMode.none;
+  (Constraints?, Constraints?) assignedConstraints = (null, null);
 
-  void mergeIfElseBranchStates({
-    required StateGraph2DNode initialState,
-  }) {
-    // todo
-    current = initialState;
+  StateGraph2D();
+
+  StateGraph2D.clone(StateGraph2D old) {
+    variables.addAll(old.variables);
+    assignedConstraints = old.assignedConstraints;
   }
 
-  Constraints getVar(String name) {
-    // this is tough, the variable is in two states at once
-    return current.variables[name] ??
-        (throw Exception('Variable $name not found'));
-  }
+  Constraints getVar(String name) =>
+      variables[name] ?? (throw Exception('Variable $name not found'));
 
-  void updateVar(String name, Constraints constraints) {
-    if (current.subgraphs.isNotEmpty) {
-      for (final subgraph in current.subgraphs.entries) {
-        subgraph.value.variables[name] = constraints;
-      }
-    } else {
-      current.variables[name] = constraints;
+  void updateVar(String name, Constraints constraints) =>
+      variables[name] = constraints;
+
+  /// A [mode]-dependent update to the constraints of binary operands
+  void assignOrAssertConstraints(Expr operand, Constraints constraints) {
+    switch (mode) {
+      case StateGraphMode.none:
+        return;
+      case StateGraphMode.assign:
+        if (assignedConstraints.$1 == null) {
+          assignedConstraints = (constraints, null);
+        } else if (assignedConstraints.$2 == null) {
+          assignedConstraints = (assignedConstraints.$1, constraints);
+        } else {
+          // merge using AND
+          throw Exception('quite the conundrum');
+        }
+      case StateGraphMode.assrt:
+        if (operand is VariableExpr) {
+          variables[operand.name.lexeme] = constraints;
+        }
     }
-  }
-
-  void addEdge({
-    required StateGraph2DNode node,
-    required BooleanConstraint condition,
-  }) {
-    node.subgraphs[condition] = StateGraph2DNode(node.variables);
-    current = node;
   }
 
   void prettyPrint() {
-    print('State Graph 2D');
-    for (final variable in root.variables.entries) {
+    print('SG2D ($id)');
+    for (final variable in variables.entries) {
       print('${variable.key}\n${variable.value.prettyPrint(2)}');
     }
   }
-}
-
-class StateGraph2DNode {
-  final Map<String, Constraints> variables;
-  final Map<BooleanConstraint, StateGraph2DNode> subgraphs = {};
-
-  StateGraph2DNode(this.variables);
-  StateGraph2DNode.empty() : variables = {};
 }

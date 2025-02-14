@@ -23,13 +23,16 @@ class AverhydeBeta {
     final AST ast = Parser(tokens).parse();
     final history = analyseTemporalDependencies();
 
-    final StateGraph2D endState = StateGraphSimulator(
-      tokens: tokens,
+    final Iterable<StateGraph2D> endStates = StateGraphSimulator(
       ast: ast,
       // origin: origin,
     ).simulate2D();
 
-    endState.prettyPrint();
+    print("${endStates.length} states");
+
+    for (final endState in endStates) {
+      endState.prettyPrint();
+    }
 
     return [];
   }

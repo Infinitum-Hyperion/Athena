@@ -6,7 +6,12 @@ var y = 10 + 5;
 var x = 2;
 var z = y - x;
 var a;
-var g = z - a;
+if (x > 5) {
+  a = 2;
+} else {
+  a = 4;
+}
+var o = z + a;
 """;
 
   AverhydeBeta(
