@@ -5,9 +5,7 @@ class StateGraphSimulator {
   late final Map<String, StateGraph2D> possibilites = {
     defaultStateGraph.id: defaultStateGraph
   };
-  late final ExprStateSimulator exprSimulator = ExprStateSimulator(
-    stateGraph2D: defaultStateGraph,
-  );
+  late final ExprStateSimulator exprSimulator = ExprStateSimulator(sim: this);
   late final StmtStateSimulator stmtSimulator = StmtStateSimulator(sim: this);
   final AST ast;
   late String currentStateGraphId = defaultStateGraph.id;
@@ -29,7 +27,11 @@ class StateGraphSimulator {
 
   Iterable<StateGraph2D> simulate2D() {
     for (final stmt in ast) {
-      stmt.accept(stmtSimulator);
+      final possibilitiesSnapshot = possibilites.entries.toList();
+      for (final possibility in possibilitiesSnapshot) {
+        setContext(possibility.key);
+        stmt.accept(stmtSimulator);
+      }
     }
 
     return possibilites.values;
@@ -52,7 +54,14 @@ class StmtStateSimulator implements StmtVisitor<void> {
 
   @override
   void visitExpressionStmt(ExpressionStmt stmt) {
-    stmt.expression.accept(sim.exprSimulator);
+    if (stmt.expression is AssignExpr) {
+      sim.currentState.updateVar(
+        (stmt.expression as AssignExpr).name.lexeme,
+        (stmt.expression as AssignExpr).value.accept(sim.exprSimulator),
+      );
+    } else {
+      stmt.expression.accept(sim.exprSimulator);
+    }
   }
 
   @override
@@ -62,13 +71,10 @@ class StmtStateSimulator implements StmtVisitor<void> {
 
   @override
   void visitIfStmt(IfStmt stmt) {
-    print('orig: ${sim.currentState.id}');
     // 1. Clone the current context and then delete it
     final ifBranchStateGraph = StateGraph2D.clone(sim.currentState);
-    print('if: ${ifBranchStateGraph.id}');
     sim.addGraph(ifBranchStateGraph);
     final elseBranchStateGraph = StateGraph2D.clone(sim.currentState);
-    print('else: ${elseBranchStateGraph.id}');
     sim.addGraph(elseBranchStateGraph);
     sim.deleteContext(sim.currentState.id);
 
@@ -76,6 +82,7 @@ class StmtStateSimulator implements StmtVisitor<void> {
     sim.setContext(ifBranchStateGraph.id);
     //    evaluate the if-condition and assert those constraints
     ifBranchStateGraph.mode = StateGraphMode.assrt;
+    final Expr ifCondition = stmt.condition;
     stmt.condition.accept(sim.exprSimulator);
     ifBranchStateGraph.mode = StateGraphMode.none;
     //    run the if-branch statements
@@ -85,10 +92,24 @@ class StmtStateSimulator implements StmtVisitor<void> {
     sim.setContext(elseBranchStateGraph.id);
     //    evaluate the else-condition and assert those constraints
     elseBranchStateGraph.mode = StateGraphMode.assrt;
-    stmt.condition.accept(sim.exprSimulator);
+    final Expr elseCondition;
+    if (ifCondition is BinaryExpr) {
+      final flippedOp =
+          sim.exprSimulator.flipOperator(ifCondition.operator.tokenType);
+      elseCondition = BinaryExpr(
+        left: ifCondition.left,
+        operator: Token(flippedOp, lexeme: '<virtual>', line: -1),
+        right: ifCondition.right,
+      );
+    } else {
+      // make the static errors go away while we figure this out
+      elseCondition = ifCondition;
+    }
+
+    elseCondition.accept(sim.exprSimulator);
     elseBranchStateGraph.mode = StateGraphMode.none;
-    //    run the if-branch statements
-    stmt.thenBranch.accept(this);
+    //    run the else-branch statements
+    stmt.elseBranch?.accept(this);
   }
 
   @override
@@ -125,10 +146,10 @@ class StmtStateSimulator implements StmtVisitor<void> {
 }
 
 class ExprStateSimulator implements ExprVisitor<Constraints> {
-  final StateGraph2D stateGraph2D;
+  final StateGraphSimulator sim;
 
   ExprStateSimulator({
-    required this.stateGraph2D,
+    required this.sim,
   });
 
   @override
@@ -243,7 +264,7 @@ class ExprStateSimulator implements ExprVisitor<Constraints> {
       };
     }
 
-    stateGraph2D.assignOrAssertConstraints(
+    sim.currentState.assignOrAssertConstraints(
       binExpr.left,
       getLeftOperandConstraints(
           binExpr.left, binExpr.operator.tokenType, binExpr.right),
@@ -251,7 +272,7 @@ class ExprStateSimulator implements ExprVisitor<Constraints> {
 
     if (![TokenType.EQUAL_EQUAL, TokenType.BANG_EQUAL]
         .contains(binExpr.operator.tokenType)) {
-      stateGraph2D.assignOrAssertConstraints(
+      sim.currentState.assignOrAssertConstraints(
         binExpr.left,
         getLeftOperandConstraints(binExpr.right,
             flipOperator(binExpr.operator.tokenType), binExpr.left),
@@ -316,7 +337,7 @@ class ExprStateSimulator implements ExprVisitor<Constraints> {
 
   @override
   Constraints visitVariableExpr(VariableExpr expr) {
-    return stateGraph2D.getVar(expr.name.lexeme);
+    return sim.currentState.getVar(expr.name.lexeme);
   }
 
   @override
@@ -337,7 +358,7 @@ class ExprStateSimulator implements ExprVisitor<Constraints> {
   @override
   Constraints visitAssignExpr(AssignExpr expr) {
     final varConstraints = expr.value.accept(this);
-    stateGraph2D.updateVar(expr.name.lexeme, varConstraints);
+    sim.currentState.updateVar(expr.name.lexeme, varConstraints);
     return varConstraints;
   }
 

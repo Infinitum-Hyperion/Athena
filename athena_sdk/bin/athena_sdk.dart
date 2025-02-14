@@ -12,7 +12,7 @@ if (x > 5) {
   a = 4;
 }
 var o = z + a;
-""";
+"""; // 15, 17
 
   AverhydeBeta(
     kgraph: KnowledgeGraph(
