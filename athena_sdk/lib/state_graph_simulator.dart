@@ -197,64 +197,32 @@ class ExprStateSimulator implements ExprVisitor<Constraints> {
         TokenType.R_CHEV => Constraints(
             continuousRangeConstraint: ContinuousRangeConstraint(
               lowerBoundType: BoundType.exclusive,
-              lowerBound: mergeNulls(
-                left.continuousRangeConstraint.lowerBound,
-                right.continuousRangeConstraint.lowerBound,
-                orElse: (a, b) => (b),
-              ),
-              upperBound: mergeNulls(
-                left.continuousRangeConstraint.upperBound,
-                right.continuousRangeConstraint.upperBound,
-                orElse: (a, b) => (a),
-              ),
+              lowerBound: right.continuousRangeConstraint.lowerBound,
+              upperBound: left.continuousRangeConstraint.upperBound,
               upperBoundType: left.continuousRangeConstraint.upperBoundType,
             ),
           ),
         TokenType.MORE_THAN_OR_EQUAL => Constraints(
             continuousRangeConstraint: ContinuousRangeConstraint(
               lowerBoundType: BoundType.inclusive,
-              lowerBound: mergeNulls(
-                left.continuousRangeConstraint.lowerBound,
-                right.continuousRangeConstraint.lowerBound,
-                orElse: (a, b) => (b),
-              ),
-              upperBound: mergeNulls(
-                left.continuousRangeConstraint.upperBound,
-                right.continuousRangeConstraint.upperBound,
-                orElse: (a, b) => (a),
-              ),
+              lowerBound: right.continuousRangeConstraint.lowerBound,
+              upperBound: left.continuousRangeConstraint.lowerBound,
               upperBoundType: left.continuousRangeConstraint.upperBoundType,
             ),
           ),
         TokenType.L_CHEV => Constraints(
             continuousRangeConstraint: ContinuousRangeConstraint(
               lowerBoundType: left.continuousRangeConstraint.lowerBoundType,
-              lowerBound: mergeNulls(
-                left.continuousRangeConstraint.lowerBound,
-                right.continuousRangeConstraint.lowerBound,
-                orElse: (a, b) => (a),
-              ),
-              upperBound: mergeNulls(
-                left.continuousRangeConstraint.upperBound,
-                right.continuousRangeConstraint.upperBound,
-                orElse: (a, b) => (b),
-              ),
+              lowerBound: left.continuousRangeConstraint.lowerBound,
+              upperBound: right.continuousRangeConstraint.upperBound,
               upperBoundType: BoundType.exclusive,
             ),
           ),
         TokenType.LESS_THAN_OR_EQUAL => Constraints(
             continuousRangeConstraint: ContinuousRangeConstraint(
               lowerBoundType: left.continuousRangeConstraint.lowerBoundType,
-              lowerBound: mergeNulls(
-                left.continuousRangeConstraint.lowerBound,
-                right.continuousRangeConstraint.lowerBound,
-                orElse: (a, b) => (a),
-              ),
-              upperBound: mergeNulls(
-                left.continuousRangeConstraint.upperBound,
-                right.continuousRangeConstraint.upperBound,
-                orElse: (a, b) => (b),
-              ),
+              lowerBound: left.continuousRangeConstraint.lowerBound,
+              upperBound: right.continuousRangeConstraint.upperBound,
               upperBoundType: BoundType.inclusive,
             ),
           ),
