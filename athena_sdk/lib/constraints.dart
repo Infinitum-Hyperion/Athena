@@ -177,12 +177,12 @@ class ContinuousRangeConstraint extends RangeConstraint {
   ContinuousRangeConstraint operator +(ContinuousRangeConstraint other) {
     final ConstraintExpression newLower = (
       union(lowerBound.$1, other.lowerBound.$1),
-      [lowerBound.$2.first + other.lowerBound.$2.first],
+      [lowerBound.$2.first.add(other.lowerBound.$2.first)],
     );
 
     final ConstraintExpression newUpper = (
       union(upperBound.$1, other.upperBound.$1),
-      [upperBound.$2.first + other.upperBound.$2.first],
+      [upperBound.$2.first.add(other.upperBound.$2.first)],
     );
 
     return ContinuousRangeConstraint(
@@ -196,12 +196,12 @@ class ContinuousRangeConstraint extends RangeConstraint {
   ContinuousRangeConstraint operator -(ContinuousRangeConstraint other) {
     final ConstraintExpression newLower = (
       subtractAndNegate(lowerBound.$1, other.lowerBound.$1),
-      [lowerBound.$2.first - other.lowerBound.$2.first],
+      [lowerBound.$2.first.subtract(other.lowerBound.$2.first)],
     );
 
     final ConstraintExpression newUpper = (
       subtractAndNegate(upperBound.$1, other.upperBound.$1),
-      [upperBound.$2.first - other.upperBound.$2.first],
+      [upperBound.$2.first.subtract(other.upperBound.$2.first)],
     );
 
     return ContinuousRangeConstraint(
@@ -212,8 +212,9 @@ class ContinuousRangeConstraint extends RangeConstraint {
     );
   }
 
+  @override
   String prettyPrint(int indent) {
-    return "${' ' * indent} |- Lower: $lowerBound, Upper: $upperBound";
+    return "${' ' * indent} |- Lower: $lowerBound ${lowerBoundType.name.substring(0, 3).toUpperCase()}\n${' ' * indent} |- Upper: $upperBound ${upperBoundType.name.substring(0, 3).toUpperCase()}";
   }
 }
 
@@ -225,14 +226,14 @@ class ValueConstraint extends Constraint {
   ValueConstraint operator +(ValueConstraint other) {
     return ValueConstraint((
       union(value.$1, other.value.$1),
-      [value.$2.first + other.value.$2.first],
+      [value.$2.first.add(other.value.$2.first)],
     ));
   }
 
   ValueConstraint operator -(ValueConstraint other) {
     return ValueConstraint((
       subtractAndNegate(value.$1, other.value.$1),
-      [value.$2.first - other.value.$2.first],
+      [value.$2.first.subtract(other.value.$2.first)],
     ));
   }
 
@@ -242,7 +243,8 @@ class ValueConstraint extends Constraint {
     for (final expr in value.$1) {
       res.add("${' ' * indent}|- EXPR: ${expr.runtimeType.toString()}");
     }
-    res.add("${' ' * indent} |- CONST: ${value.$2[0]}");
+    res.add(
+        "${' ' * indent} |- CONST: ${value.$2.isEmpty ? 'None' : value.$2[0]}");
     return res.join('\n');
   }
 }
@@ -286,4 +288,22 @@ class BooleanConstraint extends Constraint {
     return "${' ' * indent} |- whenTrue: ${whenTrue.map((set) => set.map((c) => c.prettyPrint(0)).join(', ')).join(' | ')}\n" +
         "${' ' * indent} |- whenFalse: ${whenFalse.map((set) => set.map((c) => c.prettyPrint(0)).join(', ')).join(' | ')}";
   }
+}
+
+extension on double {
+  /// An extension of the [-] operator that takes into consideration the following cases which produce NaN values:
+  /// - `infinity - infinity`
+  /// - `-infinity - (-infinity)`
+  double subtract(double other) =>
+      (this == other && (other == double.infinity || other == -double.infinity))
+          ? this
+          : this - other;
+
+  /// An extension of the [+] operator that takes into consideration the following cases which produce NaN values:
+  /// - `(- infinity) + infinity`
+  /// - `infinity + (-infinity)`
+  double add(double other) =>
+      (this != other && (other == double.infinity || other == -double.infinity))
+          ? this
+          : this + other;
 }

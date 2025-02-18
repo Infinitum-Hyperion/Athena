@@ -28,6 +28,7 @@ class StateGraphSimulator {
   Iterable<StateGraph2D> simulate2D() {
     for (final stmt in ast) {
       final possibilitiesSnapshot = possibilites.entries.toList();
+      // statement-level replication
       for (final possibility in possibilitiesSnapshot) {
         setContext(possibility.key);
         stmt.accept(stmtSimulator);
@@ -84,7 +85,7 @@ class StmtStateSimulator implements StmtVisitor<void> {
     ifBranchStateGraph.mode = StateGraphMode.assrt;
     final Expr ifCondition = stmt.condition;
     stmt.condition.accept(sim.exprSimulator);
-    ifBranchStateGraph.mode = StateGraphMode.none;
+    ifBranchStateGraph.mode = StateGraphMode.assign;
     //    run the if-branch statements
     stmt.thenBranch.accept(this);
 
@@ -107,7 +108,7 @@ class StmtStateSimulator implements StmtVisitor<void> {
     }
 
     elseCondition.accept(sim.exprSimulator);
-    elseBranchStateGraph.mode = StateGraphMode.none;
+    elseBranchStateGraph.mode = StateGraphMode.assign;
     //    run the else-branch statements
     stmt.elseBranch?.accept(this);
   }
@@ -168,7 +169,11 @@ class ExprStateSimulator implements ExprVisitor<Constraints> {
       case TokenType.SLASH:
         // see above
         throw UnimplementedError();
-
+      case TokenType.R_CHEV:
+      case TokenType.L_CHEV:
+      case TokenType.MORE_THAN_OR_EQUAL:
+      case TokenType.LESS_THAN_OR_EQUAL:
+        return visitComparisonExpr(expr);
       default:
         return Constraints.none();
     }
@@ -253,9 +258,14 @@ class ExprStateSimulator implements ExprVisitor<Constraints> {
   @override
   Constraints visitLiteralExpr(LiteralExpr expr) {
     return Constraints(
-        valueConstraint: ValueConstraint(
-      (const [], [expr.value as double]),
-    ));
+      valueConstraint: ValueConstraint(
+        (const [], [expr.value as double]),
+      ),
+      continuousRangeConstraint: ContinuousRangeConstraint(
+        lowerBound: (const [], [expr.value as double]),
+        upperBound: (const [], [expr.value as double]),
+      ),
+    );
   }
 
   @override
@@ -360,6 +370,9 @@ class StateGraph2D {
   void updateVar(String name, Constraints constraints) =>
       variables[name] = constraints;
 
+  void overrideVar(String name, Constraints constraints) =>
+      variables[name] = constraints;
+
   /// A [mode]-dependent update to the constraints of binary operands
   void assignOrAssertConstraints(Expr operand, Constraints constraints) {
     switch (mode) {
@@ -376,7 +389,7 @@ class StateGraph2D {
         }
       case StateGraphMode.assrt:
         if (operand is VariableExpr) {
-          variables[operand.name.lexeme] = constraints;
+          updateVar(operand.name.lexeme, constraints);
         }
     }
   }
