@@ -8,10 +8,16 @@ var z = y - x;
 var a;
 if (a > 5) {
   x = 0;
+} else if (a > 2) {
+  if (a < 4) {
+    x = 1;
+  } else {
+    x = 4;
+  }
 } else {
-  x = 1;
+  x = 2;
 }
-"""; // 15, 17
+""";
 
   AverhydeBeta(
     kgraph: KnowledgeGraph(
